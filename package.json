@@ -1,0 +1,32 @@
+{
+  "name": "@siddarthvader/agentic-stuff",
+  "version": "1.0.0",
+  "description": "Personal collection of agentic tools and pi extensions",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/siddarthvader/agentic-stuff.git"
+  },
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "pi-extension", 
+    "pi-skill",
+    "claude-code",
+    "agentic"
+  ],
+  "pi": {
+    "extensions": [
+      "./pi/extensions"
+    ],
+    "skills": [
+      "./claude-code/skills"
+    ]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-tui": "*"
+  },
+  "author": "Siddharth",
+  "license": "MIT"
+}

@@ -271,30 +271,38 @@ When working on code, consider these todos and suggest completing relevant ones.
     },
 
     renderResult(result, { expanded }, theme) {
+      let text = "";
+      
       if (result.details?.error) {
-        return "❌ " + result.details.error;
+        text = "❌ " + result.details.error;
+      } else {
+        const action = result.details?.action;
+        switch (action) {
+          case "added":
+            const todo = result.details?.todo;
+            const priority = todo?.priority === "high" ? "🔴" : 
+                           todo?.priority === "medium" ? "🟡" : "🟢";
+            text = "✅ " + priority + " Added: " + (todo?.text || "");
+            break;
+          
+          case "completed":
+            text = "✅ Completed: " + (result.details?.todo?.text || "");
+            break;
+          
+          case "removed":
+            text = "🗑️ Removed: " + (result.details?.todo?.text || "");
+            break;
+          
+          case "cleared_completed":
+            text = "🧹 Cleared " + result.details?.count + " completed todos";
+            break;
+          
+          default:
+            text = result.content?.[0]?.text || "Todo operation completed";
+        }
       }
-
-      const action = result.details?.action;
-      switch (action) {
-        case "added":
-          const todo = result.details?.todo;
-          const priority = todo?.priority === "high" ? "🔴" : 
-                         todo?.priority === "medium" ? "🟡" : "🟢";
-          return "✅ " + priority + " Added: " + (todo?.text || "");
-        
-        case "completed":
-          return "✅ Completed: " + (result.details?.todo?.text || "");
-        
-        case "removed":
-          return "🗑️ Removed: " + (result.details?.todo?.text || "");
-        
-        case "cleared_completed":
-          return "🧹 Cleared " + result.details?.count + " completed todos";
-        
-        default:
-          return result.content?.[0]?.text || "Todo operation completed";
-      }
+      
+      return [text];
     }
   });
 

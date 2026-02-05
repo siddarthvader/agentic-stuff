@@ -272,7 +272,7 @@ When working on code, consider these todos and suggest completing relevant ones.
 
     renderResult(result, { expanded }, theme) {
       if (result.details?.error) {
-        return `${theme.fg("error", "❌")} ${result.details.error}`;
+        return "❌ " + result.details.error;
       }
 
       const action = result.details?.action;
@@ -281,16 +281,16 @@ When working on code, consider these todos and suggest completing relevant ones.
           const todo = result.details?.todo;
           const priority = todo?.priority === "high" ? "🔴" : 
                          todo?.priority === "medium" ? "🟡" : "🟢";
-          return `${theme.fg("success", "✅")} ${priority} Added: ${theme.fg("dim", todo?.text)}`;
+          return "✅ " + priority + " Added: " + (todo?.text || "");
         
         case "completed":
-          return `${theme.fg("success", "✅")} Completed: ${theme.fg("strikethrough", result.details?.todo?.text)}`;
+          return "✅ Completed: " + (result.details?.todo?.text || "");
         
         case "removed":
-          return `${theme.fg("warning", "🗑️")} Removed: ${theme.fg("dim", result.details?.todo?.text)}`;
+          return "🗑️ Removed: " + (result.details?.todo?.text || "");
         
         case "cleared_completed":
-          return `${theme.fg("success", "🧹")} Cleared ${result.details?.count} completed todos`;
+          return "🧹 Cleared " + result.details?.count + " completed todos";
         
         default:
           return result.content?.[0]?.text || "Todo operation completed";

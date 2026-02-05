@@ -118,7 +118,7 @@ You have ${activeTodos.length} pending todo(s):
 
 ${todoList}
 
-When working on code, consider these todos and suggest completing relevant ones. Use the todo_update tool to mark items as complete when you finish them.
+When working on code, consider these todos and suggest completing relevant ones. Use the todo_manage tool to mark items as complete when you finish them.
 `
     };
   });

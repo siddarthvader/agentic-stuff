@@ -10,6 +10,7 @@ import * as path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { StringEnum } from "@mariozechner/pi-ai";
+import { Text } from "@mariozechner/pi-tui";
 
 interface Todo {
   id: string;
@@ -274,7 +275,7 @@ When working on code, consider these todos and suggest completing relevant ones.
       let text = "";
       
       if (result.details?.error) {
-        text = "❌ " + result.details.error;
+        text = theme.fg("error", "❌ " + result.details.error);
       } else {
         const action = result.details?.action;
         switch (action) {
@@ -282,27 +283,28 @@ When working on code, consider these todos and suggest completing relevant ones.
             const todo = result.details?.todo;
             const priority = todo?.priority === "high" ? "🔴" : 
                            todo?.priority === "medium" ? "🟡" : "🟢";
-            text = "✅ " + priority + " Added: " + (todo?.text || "");
+            text = theme.fg("success", "✅ ") + priority + " " + theme.fg("muted", "Added: ") + theme.fg("text", todo?.text || "");
             break;
           
           case "completed":
-            text = "✅ Completed: " + (result.details?.todo?.text || "");
+            text = theme.fg("success", "✅ Completed: ") + theme.fg("muted", result.details?.todo?.text || "");
             break;
           
           case "removed":
-            text = "🗑️ Removed: " + (result.details?.todo?.text || "");
+            text = theme.fg("error", "🗑️ Removed: ") + theme.fg("muted", result.details?.todo?.text || "");
             break;
           
           case "cleared_completed":
-            text = "🧹 Cleared " + result.details?.count + " completed todos";
+            text = theme.fg("success", "🧹 Cleared ") + theme.fg("muted", result.details?.count + " completed todos");
             break;
           
           default:
-            text = result.content?.[0]?.text || "Todo operation completed";
+            const content = result.content?.[0];
+            text = theme.fg("muted", content?.type === "text" ? content.text : "Todo operation completed");
         }
       }
       
-      return [text];
+      return new Text(text, 0, 0);
     }
   });
 

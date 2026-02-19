@@ -47,6 +47,27 @@ cp extensions/todo-manager.ts .pi/extensions/
 "What are my current high priority todos?"
 ```
 
+### web-text.ts
+Fetches text-only content from URLs and performs basic web searches (DuckDuckGo HTML).
+
+**Features:**
+- ✅ Fetch URL content and strip HTML to plain text
+- ✅ Search the web without API keys (DuckDuckGo HTML)
+- ✅ Output truncation with full output saved to temp file
+- ✅ Returns text-only content to the agent
+
+**Installation:**
+```bash
+cp extensions/web-text.ts .pi/extensions/
+```
+
+**Usage:**
+```bash
+# AI tool calls
+"Fetch text from https://example.com"
+"Search the web for: pi coding agent extensions"
+```
+
 ## 📚 Documentation
 
 - **[Extension Development Guide](docs/extension-development.md)** - Complete guide to creating pi extensions

@@ -14,6 +14,7 @@ agentic-stuff/
 │   ├── skills/           # Reusable Claude Code skills
 │   └── examples/         # Skill templates and patterns
 ├── tools/               # Standalone agentic tools
+├── tmux/                # tmux helpers (session manager, shortcuts)
 ├── other/               # Other AI agent integrations
 └── README.md
 ```
@@ -78,6 +79,10 @@ tools/
 ├── deploy-agents/        # Deployment automation
 └── monitoring-agents/    # System monitoring
 ```
+
+## 🖥️ tmux Helpers
+
+- **[open-session-manager](tmux/open-session-manager/README.md)** - Popup picker for running agent sessions (switch fast with `Prefix + A`)
 
 ## 🔧 Other AI Agents
 

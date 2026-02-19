@@ -47,6 +47,26 @@ cp extensions/todo-manager.ts .pi/extensions/
 "What are my current high priority todos?"
 ```
 
+### ask-user-ui.ts
+Interactive question prompt that lets the agent ask clarifying questions via a custom TUI.
+
+**Features:**
+- ✅ Custom TUI prompt with keyboard navigation
+- ✅ Optional choices + free-form answer
+- ✅ Structured answer details returned to the agent
+
+**Installation:**
+```bash
+cp extensions/ask-user-ui.ts .pi/extensions/
+```
+
+**Usage:**
+```bash
+# AI tool calls
+"Ask the user which database to use (Postgres/SQLite) and allow a custom answer."
+"Ask the user to confirm the deployment target (dev/staging/prod)."
+```
+
 ### web-text.ts
 Fetches text-only content from URLs and performs basic web searches (DuckDuckGo HTML).
 

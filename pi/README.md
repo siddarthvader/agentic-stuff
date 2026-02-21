@@ -53,6 +53,7 @@ Interactive question prompt that lets the agent ask clarifying questions via a c
 **Features:**
 - ✅ Custom TUI prompt with keyboard navigation
 - ✅ Optional choices + free-form answer
+- ✅ Multi-select mode for multiple choices
 - ✅ Structured answer details returned to the agent
 
 **Installation:**
@@ -65,6 +66,7 @@ cp extensions/ask-user-ui.ts .pi/extensions/
 # AI tool calls
 "Ask the user which database to use (Postgres/SQLite) and allow a custom answer."
 "Ask the user to confirm the deployment target (dev/staging/prod)."
+"Ask the user to pick multiple environments (dev/staging/prod) with multiSelect=true."
 ```
 
 ### web-text.ts

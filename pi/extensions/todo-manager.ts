@@ -31,11 +31,33 @@ export default function todoManagerExtension(pi: ExtensionAPI) {
   let state: TodoState = { todos: [], nextId: 1 };
   let todoFile = "";
 
+  function normalizeState(value: unknown): TodoState {
+    if (Array.isArray(value)) {
+      const todos = value.filter(Boolean) as Todo[];
+      const maxId = todos.reduce((max, todo) => {
+        const match = typeof todo?.id === "string" ? todo.id.match(/todo-(\d+)/) : null;
+        return match ? Math.max(max, Number(match[1])) : max;
+      }, 0);
+
+      return { todos, nextId: Math.max(maxId, todos.length) + 1 };
+    }
+
+    const raw = value as Partial<TodoState> | undefined;
+    const todos = Array.isArray(raw?.todos) ? (raw!.todos as Todo[]) : [];
+    const nextId =
+      typeof raw?.nextId === "number" && Number.isFinite(raw.nextId) && raw.nextId > 0
+        ? raw.nextId
+        : Math.max(todos.length, 0) + 1;
+
+    return { todos, nextId };
+  }
+
   function loadTodos(): void {
     if (fs.existsSync(todoFile)) {
       try {
         const data = fs.readFileSync(todoFile, "utf-8");
-        state = JSON.parse(data);
+        const parsed = JSON.parse(data);
+        state = normalizeState(parsed);
       } catch (error) {
         console.warn("Failed to load todos:", error);
       }

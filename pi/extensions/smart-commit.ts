@@ -1,0 +1,1 @@
+/home/d2du/code/ug/agentic-stuff/.pi/extensions/smart-commit.ts

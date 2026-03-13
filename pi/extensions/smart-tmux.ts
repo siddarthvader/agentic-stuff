@@ -16,11 +16,32 @@ interface PaneInfo {
   preview: string;
 }
 
-function extractPreview(rawOutput: string): string {
-  const lines = rawOutput.split("\n");
-  const nonEmpty = lines.map((l) => l.trim()).filter((l) => l.length > 0);
-  if (nonEmpty.length === 0) return "(empty)";
-  return nonEmpty.slice(-3).map((l) => l.length > 45 ? l.slice(0, 44) + "…" : l).join(" │ ");
+function isShellCommand(cmd: string): boolean {
+  return cmd === "zsh" || cmd === "bash" || cmd === "fish";
+}
+
+function cleanAnsi(text: string): string {
+  return text.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "");
+}
+
+function cleanPreview(rawOutput: string): string {
+  const lines = cleanAnsi(rawOutput)
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+
+  if (lines.length === 0) return "";
+
+  const useful = lines.filter((l) => {
+    if (/^[~\/\w.-]+[@:].*[#$>]?$/.test(l)) return false;
+    if (/^[│└┌┐─━~ ]+$/.test(l)) return false;
+    if (/^[><^~`'"(){}\[\]|_\\\-=$ ]+$/.test(l)) return false;
+    if (/^[~ ]*[#$>]$/.test(l)) return false;
+    return true;
+  });
+
+  const picked = (useful.length > 0 ? useful : lines).slice(-2);
+  return picked.map((l) => (l.length > 60 ? l.slice(0, 59) + "…" : l)).join(" │ ");
 }
 
 export default function (pi: ExtensionAPI) {
@@ -38,24 +59,35 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerCommand("tmux", {
     description: "Read a tmux pane (sorted by relevance)",
-    handler: async (args) => {
+    handler: async (args, ctx) => {
       const target = args?.trim() || undefined;
-      pi.sendUserMessage(`use smart_tmux${target ? ` with target "${target}"` : ""}`, { deliverAs: "followUp" });
+      if (target) {
+        // Direct target — just ask the agent to read it
+        pi.sendUserMessage(`use smart_tmux with target "${target}"`, { deliverAs: "followUp" });
+      } else {
+        // No target — run picker directly, skip the LLM round-trip
+        const picked = await pickPane(undefined, ctx);
+        if (!picked) { ctx.ui.notify("Cancelled", "info"); return; }
+        pi.sendUserMessage(`use smart_tmux with target "${picked.id}"`, { deliverAs: "followUp" });
+      }
     },
   });
 
   async function pickPane(signal: AbortSignal | undefined, ctx: any): Promise<PaneInfo | null> {
-    const listResult = await pi.exec("tmux",
-      ["list-panes", "-a", "-F",
+    // Run both tmux queries in parallel
+    const [listResult, currentPane] = await Promise.all([
+      pi.exec("tmux", ["list-panes", "-a", "-F",
         "#{session_name}:#{window_index}.#{pane_index}\t#{window_name}\t#{pane_current_command}\t#{pane_current_path}\t#{pane_width}x#{pane_height}\t#{?pane_active,*,}"],
-      { signal, timeout: 3000 });
+        { signal, timeout: 3000 }),
+      pi.exec("tmux", ["display-message", "-p", "#{session_name}:#{window_index}.#{pane_index}"], { signal, timeout: 2000 }),
+    ]);
+
     if (listResult.code !== 0) throw new Error(`Failed to list panes: ${listResult.stderr}`);
 
     const cwd = ctx.cwd;
-    const currentPane = await pi.exec("tmux", ["display-message", "-p", "#{session_name}:#{window_index}.#{pane_index}"], { signal, timeout: 2000 });
-    const currentWindow = currentPane.code === 0 ? currentPane.stdout.trim().replace(/\.\d+$/, "") : "";
-    const currentSession = currentWindow.split(":")[0] || "";
     const currentPaneId = currentPane.code === 0 ? currentPane.stdout.trim() : "";
+    const currentWindow = currentPaneId.replace(/\.\d+$/, "");
+    const currentSession = currentWindow.split(":")[0] || "";
 
     const panes = listResult.stdout.trim().split("\n").filter(Boolean).map((line) => {
       const [id, winName, cmd, path, size, active] = line.split("\t");
@@ -70,7 +102,7 @@ export default function (pi: ExtensionAPI) {
       score += (pickHistory[p.id] || 0) * 100;
       if (p.path === cwd) score += 50;
       else if (p.path.startsWith(cwd) || cwd.startsWith(p.path)) score += 25;
-      if (p.cmd !== "zsh" && p.cmd !== "bash" && p.cmd !== "fish") score += 10;
+      if (!isShellCommand(p.cmd)) score += 10;
       if (p.active) score += 5;
       return { ...p, score, preview: "" };
     });
@@ -78,26 +110,22 @@ export default function (pi: ExtensionAPI) {
 
     if (scored.length === 0) throw new Error("No tmux panes found");
 
-    // Pre-capture top 4
-    const topN = Math.min(4, scored.length);
-    const topPanes = scored.slice(0, topN);
+    // Only show top 4 most relevant panes
+    const top = scored.slice(0, 4);
+
+    // Fetch previews for just the 4 in parallel
     const previews = await Promise.all(
-      topPanes.map(async (p) => {
+      top.map(async (p) => {
         const cap = await pi.exec("tmux", ["capture-pane", "-p", "-t", p.id], { signal, timeout: 2000 });
-        return cap.code === 0 ? extractPreview(cap.stdout) : "?";
+        return cap.code === 0 ? cleanPreview(cap.stdout) : "";
       })
     );
-    topPanes.forEach((p, i) => { p.preview = previews[i]; });
+    top.forEach((p, i) => {
+      p.preview = previews[i];
+    });
 
-    const hasMore = scored.length > topN;
-
-    // Custom TUI picker
     return ctx.ui.custom<PaneInfo | null>((tui: any, theme: any, _kb: any, done: (v: PaneInfo | null) => void) => {
       let cursor = 0;
-      let showAll = false;
-      let allPreviews: string[] | null = null;
-      const items = () => showAll ? scored : topPanes;
-      const total = () => items().length + (hasMore && !showAll ? 1 : 0); // +1 for "show all"
       let cache: string[] | undefined;
 
       function render(width: number): string[] {
@@ -110,39 +138,24 @@ export default function (pi: ExtensionAPI) {
         lines.push(theme.fg("accent", bar));
         lines.push("");
 
-        const list = items();
-        for (let i = 0; i < list.length; i++) {
-          const p = list[i];
+        for (let i = 0; i < top.length; i++) {
+          const p = top[i];
           const sel = i === cursor;
           const shortPath = p.path.replace(/^\/home\/[^/]+/, "~");
           const num = theme.fg(sel ? "accent" : "dim", `${i + 1}`);
           const arrow = sel ? theme.fg("accent", " ▸ ") : "   ";
-          const name = sel
-            ? theme.bold(theme.fg("accent", `${p.id}  ${p.winName}`))
-            : theme.fg("text", `${p.id}  ${p.winName}`);
-          const pathStr = theme.fg("muted", shortPath);
-          const active = p.active ? theme.fg("warning", " ◀") : "";
+          const paneId = sel
+            ? theme.bold(theme.fg("accent", p.id))
+            : theme.bold(theme.fg("text", p.id));
+          const cmdBadge = theme.fg("warning", ` [${p.cmd}]`);
+          const active = p.active ? theme.bold(theme.fg("accent", " ●")) : "";
 
-          lines.push(truncateToWidth(`${arrow}${num}  ${name}  ${pathStr}${active}`, width));
+          lines.push(truncateToWidth(`${arrow}${num}  ${paneId}${cmdBadge}${active}  ${theme.fg("muted", shortPath)}`, width));
 
-          // Preview line
-          const preview = p.preview || (showAll && allPreviews ? allPreviews[i] : "");
-          if (preview) {
-            const previewLine = sel
-              ? theme.fg("accent", `      ${preview}`)
-              : theme.fg("dim", `      ${preview}`);
-            lines.push(truncateToWidth(previewLine, width));
-          }
-          lines.push("");
-        }
-
-        if (hasMore && !showAll) {
-          const sel = cursor === list.length;
-          const arrow = sel ? theme.fg("accent", " ▸ ") : "   ";
-          const text = sel
-            ? theme.bold(theme.fg("accent", "… show all panes"))
-            : theme.fg("dim", "… show all panes");
-          lines.push(`${arrow}${text}`);
+          const line2 = p.preview
+            ? `      ${p.preview}`
+            : `      ${p.winName || shortPath}`;
+          lines.push(truncateToWidth(sel ? theme.fg("accent", line2) : theme.fg("dim", line2), width));
           lines.push("");
         }
 
@@ -154,20 +167,6 @@ export default function (pi: ExtensionAPI) {
         return lines;
       }
 
-      async function loadAllPreviews() {
-        if (allPreviews) return;
-        allPreviews = await Promise.all(
-          scored.map(async (p, i) => {
-            if (i < topN) return topPanes[i].preview;
-            const cap = await pi.exec("tmux", ["capture-pane", "-p", "-t", p.id], { timeout: 2000 });
-            return cap.code === 0 ? extractPreview(cap.stdout) : "?";
-          })
-        );
-        scored.forEach((p, i) => { p.preview = allPreviews![i]; });
-        cache = undefined;
-        tui.requestRender();
-      }
-
       function handleInput(data: string) {
         if (matchesKey(data, Key.escape)) { done(null); return true; }
 
@@ -176,29 +175,19 @@ export default function (pi: ExtensionAPI) {
           cache = undefined; tui.requestRender(); return true;
         }
         if (matchesKey(data, Key.down)) {
-          cursor = Math.min(total() - 1, cursor + 1);
+          cursor = Math.min(top.length - 1, cursor + 1);
           cache = undefined; tui.requestRender(); return true;
         }
 
-        // Number shortcuts 1-4
         const num = parseInt(data);
-        if (num >= 1 && num <= items().length) {
-          done(items()[num - 1]);
+        if (num >= 1 && num <= top.length) {
+          done(top[num - 1]);
           return true;
         }
 
         if (matchesKey(data, Key.enter)) {
-          const list = items();
-          if (hasMore && !showAll && cursor === list.length) {
-            showAll = true;
-            cursor = 0;
-            cache = undefined;
-            tui.requestRender();
-            loadAllPreviews();
-            return true;
-          }
-          if (cursor < list.length) {
-            done(list[cursor]);
+          if (cursor < top.length) {
+            done(top[cursor]);
             return true;
           }
         }
@@ -236,25 +225,6 @@ export default function (pi: ExtensionAPI) {
         const picked = await pickPane(signal, ctx);
         if (!picked) return { content: [{ type: "text", text: "Cancelled." }], details: {} };
         target = picked.id;
-      }
-
-      // Line count picker
-      if (!params.lines && ctx.hasUI) {
-        const howMuch = await ctx.ui.select("How much to capture?", [
-          "Visible area only",
-          "Last 50 lines",
-          "Last 100 lines",
-          "Last 500 lines",
-          "Last 1000 lines",
-          "Everything (full scrollback)",
-        ]);
-        if (!howMuch) return { content: [{ type: "text", text: "Cancelled." }], details: {} };
-
-        if (howMuch.includes("50")) params.lines = 50;
-        else if (howMuch.includes("100")) params.lines = 100;
-        else if (howMuch.includes("500")) params.lines = 500;
-        else if (howMuch.includes("1000")) params.lines = 1000;
-        else if (howMuch.includes("Everything")) params.lines = 999999;
       }
 
       pickHistory[target] = (pickHistory[target] || 0) + 1;

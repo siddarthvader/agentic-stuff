@@ -25,6 +25,7 @@
   <main id="blocks">
     <section class="empty">Waiting for pi session data…</section>
   </main>
+  <button id="latest-fab" type="button" onclick="goLatest()" title="Go to latest" aria-label="Go to latest"><span>↓</span> Go to latest</button>
   <script>
     let blocksScrollY = 0;
     document.body.addEventListener('htmx:beforeSwap', function (event) {
@@ -46,6 +47,9 @@
       form.elements.user.checked = user;
       form.elements.assistant.checked = assistant;
       refreshBlocks();
+    }
+    function goLatest() {
+      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
     }
   </script>
 </body>

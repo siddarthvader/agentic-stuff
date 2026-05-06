@@ -24,23 +24,34 @@ agentic-stuff/
 Pi is a terminal-based AI coding assistant with read/write/bash tools and extensible architecture.
 
 ### Extensions
+Extensions live in **[pi/extensions/](pi/extensions/)** and are loaded through this repo's pi package manifest.
+
+Current extensions include:
+- **[ask-user-ui.ts](pi/extensions/ask-user-ui.ts)** - Interactive user prompt tool via pi UI
+- **[audio-transcribe.ts](pi/extensions/audio-transcribe.ts)** - Audio transcription support
 - **[claude-skills.ts](pi/extensions/claude-skills.ts)** - Auto-load Claude Code skills into pi
+- **[git-worktree.ts](pi/extensions/git-worktree.ts)** - Git worktree workflow helpers
+- **[history-context-finder.ts](pi/extensions/history-context-finder.ts)** - Search/summarize prior pi chat history
+- **[smart-commit.ts](pi/extensions/smart-commit.ts)** - Assisted git commit workflow
+- **[smart-tmux.ts](pi/extensions/smart-tmux.ts)** - Smart tmux pane reader
+- **[thinking-trace](pi/extensions/thinking-trace/)** - Read assistant thinking/reasoning trace blocks; `/thinking-trace` opens a persistent HTMX/SSE browser viewer
 - **[todo-manager.ts](pi/extensions/todo-manager.ts)** - Persistent todo list with AI integration
+- **[web-text.ts](pi/extensions/web-text.ts)** - Fetch URLs and perform text web search
 
 ### Quick Start
 ```bash
-# Install extension locally
-cp pi/extensions/claude-skills.ts .pi/extensions/
+# One-time install as a pi package
+pi install /home/d2du/code/ug/agentic-stuff
 
-# Or globally  
-cp pi/extensions/claude-skills.ts ~/.pi/agent/extensions/
+# Add new extensions under pi/extensions/, then reload pi
+/reload
 
-# Test extension
+# Test one extension directly
 pi -e ./pi/extensions/claude-skills.ts --version
 ```
 
 ### Resources
-- **[Extension Development Guide](pi/docs/extension-development.md)**
+- **[Extension Development Guide](pi/docs/extension-dev.md)**
 - **[Extension Examples](pi/examples/)**
 - [Pi Official Docs](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent)
 
@@ -99,8 +110,8 @@ other/
 ## 🎯 Common Use Cases
 
 ### Project Setup
-1. **Copy pi extensions** to `.pi/extensions/`
-2. **Copy Claude skills** to `.claude/skills/`
+1. **Install this repo as a pi package** with `pi install /path/to/agentic-stuff`
+2. **Copy Claude skills** to `.claude/skills/` if needed
 3. **Configure tools** for your tech stack
 4. **Set up workflows** for your team
 
@@ -123,9 +134,8 @@ other/
 git clone https://github.com/siddarthvader/agentic-stuff
 cd agentic-stuff
 
-# Install core extensions
-cp pi/extensions/claude-skills.ts ~/.pi/agent/extensions/
-cp pi/extensions/todo-manager.ts ~/.pi/agent/extensions/
+# Install this repo as a pi package
+pi install "$PWD"
 
 # Create first skill
 mkdir -p .claude/skills/project-patterns
@@ -153,9 +163,10 @@ cd tools/my-agent
 
 ### Adding Pi Extensions
 1. Create extension in `pi/extensions/`
-2. Add docs in `pi/docs/` 
-3. Test with `pi -e ./extension.ts --version`
-4. Update README
+2. Add development notes to `pi/docs/extension-dev.md` if needed
+3. Test with `pi -e ./pi/extensions/my-extension.ts --version`
+4. Run `/reload` in pi
+5. Update this README if it should be advertised
 
 ### Adding Claude Skills
 1. Create skill in `claude-code/skills/`

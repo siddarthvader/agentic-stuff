@@ -136,31 +136,100 @@ pi.on("session_start", async (_event, ctx) => {
 });
 ```
 
+## Repo Workflow
+
+This repository is a pi package. `package.json` declares:
+
+```json
+{
+  "pi": {
+    "extensions": ["./pi/extensions"]
+  }
+}
+```
+
+After installing the repo once, every `.ts` or `.js` file in `pi/extensions/` is auto-discovered by pi.
+
+### One-Time Install
+
+Global install for your user:
+
+```bash
+pi install /home/d2du/code/ug/agentic-stuff
+```
+
+Project-local install, written to `.pi/settings.json`:
+
+```bash
+pi install -l /home/d2du/code/ug/agentic-stuff
+```
+
+Do not symlink `~/.pi/agent/extensions` to this repo. Prefer the package/settings workflow above.
+
+### Adding a New Extension
+
+1. Create the extension:
+
+```bash
+$EDITOR pi/extensions/my-extension.ts
+```
+
+2. Export the standard factory:
+
+```typescript
+import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+
+export default function (pi: ExtensionAPI) {
+  pi.registerCommand("my-cmd", {
+    description: "Run my command",
+    handler: async (_args, ctx) => {
+      ctx.ui.notify("my extension works", "info");
+    },
+  });
+}
+```
+
+3. Test load/syntax:
+
+```bash
+pi -e ./pi/extensions/my-extension.ts --version
+```
+
+4. Reload a running pi session:
+
+```text
+/reload
+```
+
+No settings edits are needed for each new extension.
+
 ## Testing Extensions
 
 ### Syntax Check
 ```bash
-pi -e ./my-extension.ts --version
+pi -e ./pi/extensions/my-extension.ts --version
 ```
 
 ### Isolated Testing
 ```bash
-pi -e ./my-extension.ts -p "test prompt"
+pi -e ./pi/extensions/my-extension.ts -p "test prompt"
 ```
 
 ### Integration Testing
 ```bash
 # Test with real project
 cd /path/to/project
-pi -e /path/to/my-extension.ts
+pi -e /home/d2du/code/ug/agentic-stuff/pi/extensions/my-extension.ts
 ```
 
 ## Distribution
 
-### Local Copy
+### Local Package
 ```bash
-cp my-extension.ts ~/.pi/agent/extensions/
+pi install /path/to/agentic-stuff
 ```
+
+This writes a local path into `~/.pi/agent/settings.json` under `packages` and uses the repo's `package.json` `pi` manifest.
 
 ### Git Package
 ```json

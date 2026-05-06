@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pi Thinking Trace</title>
+  <link rel="stylesheet" href="/style.css" />
+  <script src="/htmx.min.js"></script>
+  <script src="/sse.js"></script>
+</head>
+<body hx-ext="sse" sse-connect="/events">
+  <header class="toolbar">
+    <h1>Pi Thinking Trace <span id="status" sse-swap="status" hx-swap="outerHTML">disconnected</span></h1>
+    <div id="refresh" hx-get="/blocks" hx-include="#filters" hx-target="#blocks" hx-swap="innerHTML show:none" hx-trigger="load, sse:refresh" hidden></div>
+    <form id="filters" hx-get="/blocks" hx-target="#blocks" hx-swap="innerHTML show:none" hx-trigger="change, keyup delay:200ms from:#search">
+      <label><input name="thinking" type="checkbox" checked /> thinking</label>
+      <label><input name="user" type="checkbox" checked /> user</label>
+      <label><input name="assistant" type="checkbox" checked /> visible response</label>
+      <label><input name="code" type="checkbox" checked /> code</label>
+      <input id="search" name="q" placeholder="filter..." />
+      <button type="button" onclick="setPreset(true,false,false)">only thinking</button>
+      <button type="button" onclick="setPreset(true,false,true)">thinking + response</button>
+    </form>
+  </header>
+  <main id="blocks">
+    <section class="empty">Waiting for pi session data…</section>
+  </main>
+  <script>
+    let blocksScrollY = 0;
+    document.body.addEventListener('htmx:beforeSwap', function (event) {
+      if (event.detail && event.detail.target && event.detail.target.id === 'blocks') {
+        blocksScrollY = window.scrollY;
+      }
+    });
+    document.body.addEventListener('htmx:afterSwap', function (event) {
+      if (event.detail && event.detail.target && event.detail.target.id === 'blocks') {
+        requestAnimationFrame(function () { window.scrollTo(0, blocksScrollY); });
+      }
+    });
+    function refreshBlocks() {
+      htmx.trigger(document.getElementById('refresh'), 'sse:refresh');
+    }
+    function setPreset(thinking, user, assistant) {
+      const form = document.getElementById('filters');
+      form.elements.thinking.checked = thinking;
+      form.elements.user.checked = user;
+      form.elements.assistant.checked = assistant;
+      refreshBlocks();
+    }
+  </script>
+</body>
+</html>

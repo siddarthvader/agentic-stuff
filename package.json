@@ -3,10 +3,17 @@
   "version": "1.0.0",
   "private": true,
   "description": "Extensions and tools for AI coding agents (pi, claude-code)",
+  "pi": {
+    "extensions": [
+      "./pi/extensions"
+    ]
+  },
   "dependencies": {
     "@mariozechner/pi-ai": "^0.56.0",
     "@mariozechner/pi-coding-agent": "^0.56.0",
     "@mariozechner/pi-tui": "^0.56.0",
-    "@sinclair/typebox": "^0.34.0"
+    "@sinclair/typebox": "^0.34.0",
+    "htmx-ext-sse": "^2.2.4",
+    "htmx.org": "^2.0.10"
   }
 }

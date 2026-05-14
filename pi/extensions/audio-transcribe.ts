@@ -1,23 +1,37 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, statSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 
-function parseDuration(arg?: string): number {
-  const n = Number(arg ?? "10");
-  if (!Number.isFinite(n)) return 10;
+function parseDuration(arg?: string): number | undefined {
+  if (!arg) return undefined;
+  const n = Number(arg);
+  if (!Number.isFinite(n)) return undefined;
   return Math.max(1, Math.min(120, Math.floor(n)));
 }
 
-function parseAudioArgs(args?: string): { duration: number; stopPhrase: string } {
+function parseAudioArgs(args?: string): { duration?: number; stopPhrase: string } {
   const raw = (args || "").trim();
-  if (!raw) return { duration: 10, stopPhrase: "stop gandu" };
+  if (!raw) return { stopPhrase: "stop gandu" };
 
   const parts = raw.split(/\s+/);
   const duration = parseDuration(parts[0]);
-  const stopPhrase = parts.slice(1).join(" ").trim() || "stop gandu";
+  const stopPhrase = (duration ? parts.slice(1) : parts).join(" ").trim() || "stop gandu";
   return { duration, stopPhrase };
 }
+
+type ActiveRecording = {
+  child: ChildProcessWithoutNullStreams;
+  wavPath: string;
+  stopPhrase: string;
+  apiKey: string;
+  stderr: string;
+  transcribing: boolean;
+  timer?: NodeJS.Timeout;
+};
+
+let activeRecording: ActiveRecording | undefined;
 
 async function resolveOpenAIApiKey(ctx: any): Promise<string | undefined> {
   const envKey = process.env.OPENAI_API_KEY?.trim() || process.env.PI_AUDIO_API_KEY?.trim();
@@ -44,22 +58,92 @@ async function resolveOpenAIApiKey(ctx: any): Promise<string | undefined> {
 }
 
 export default function audioTranscribeExtension(pi: ExtensionAPI) {
+  async function transcribeRecording(recording: ActiveRecording, ctx: any) {
+    if (recording.transcribing) return;
+    recording.transcribing = true;
+    if (recording.timer) clearTimeout(recording.timer);
+
+    try {
+      if (!existsSync(recording.wavPath) || statSync(recording.wavPath).size < 1024) {
+        ctx.ui.notify("Recording was empty. Check mic input/permissions.", "error");
+        if (recording.stderr.trim()) pi.sendUserMessage(`Audio recording error:\n${recording.stderr.trim()}`);
+        return;
+      }
+
+      ctx.ui.notify("Transcribing...", "info");
+
+      const audioBytes = readFileSync(recording.wavPath);
+      const audioBlob = new Blob([audioBytes], { type: "audio/wav" });
+      const form = new FormData();
+      form.append("file", audioBlob, "audio.wav");
+      form.append("model", "gpt-4o-mini-transcribe");
+
+      const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${recording.apiKey}` },
+        body: form,
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        ctx.ui.notify(`Transcription failed: ${res.status}`, "error");
+        pi.sendUserMessage(`Transcription API error:\n${errText}`);
+        return;
+      }
+
+      const data = (await res.json()) as { text?: string };
+      const transcript = (data.text ?? "").trim();
+
+      if (!transcript) {
+        ctx.ui.notify("No speech detected.", "warning");
+        return;
+      }
+
+      if (recording.stopPhrase && transcript.toLowerCase().includes(recording.stopPhrase.toLowerCase())) {
+        ctx.ui.notify(`Stop phrase detected: \"${recording.stopPhrase}\"`, "info");
+        return;
+      }
+
+      pi.sendUserMessage(transcript);
+      ctx.ui.notify("Transcript inserted into chat.", "info");
+    } catch (error: any) {
+      ctx.ui.notify(`Audio command failed: ${error?.message ?? String(error)}`, "error");
+    } finally {
+      try {
+        if (existsSync(recording.wavPath)) unlinkSync(recording.wavPath);
+      } catch {
+        // ignore cleanup failures
+      }
+      if (activeRecording === recording) activeRecording = undefined;
+    }
+  }
+
+  function stopActiveRecording(ctx: any) {
+    const recording = activeRecording;
+    if (!recording) {
+      ctx.ui.notify("No active recording found.", "warning");
+      return;
+    }
+    ctx.ui.notify("Stopping recording...", "info");
+    recording.child.kill("SIGINT");
+    setTimeout(() => {
+      if (activeRecording === recording && !recording.child.killed) recording.child.kill("SIGTERM");
+    }, 1500).unref();
+  }
+
   pi.registerCommand("audio-stop", {
-    description: "Stop any active audio recording process",
-    handler: async (_args, ctx) => {
-      const kill = await pi.exec("bash", [
-        "-lc",
-        "pkill -f '(^|/)rec( |$)|(^|/)arecord( |$)|ffmpeg.*-f pulse' 2>/dev/null || true",
-      ]);
-      if (kill.code === 0) ctx.ui.notify("Stopped active recording (if any).", "info");
-      else ctx.ui.notify("No active recording found.", "warning");
-    },
+    description: "Stop active audio recording and transcribe it",
+    handler: async (_args, ctx) => stopActiveRecording(ctx),
   });
 
   pi.registerCommand("audio", {
-    description: "Record mic audio and transcribe it (/audio [seconds] [stop phrase], default: /audio 10 stop gandu)",
+    description: "Record mic audio until /audio-stop, then transcribe (/audio [stop phrase]; optional: /audio [seconds] [stop phrase])",
     handler: async (args, ctx) => {
       if (!ctx.hasUI) return;
+      if (activeRecording) {
+        ctx.ui.notify("Already recording. Use /audio-stop when done.", "warning");
+        return;
+      }
 
       const apiKey = await resolveOpenAIApiKey(ctx);
       if (!apiKey) {
@@ -71,77 +155,54 @@ export default function audioTranscribeExtension(pi: ExtensionAPI) {
       const { duration, stopPhrase } = parseAudioArgs(args);
       const wavPath = join(tmpdir(), `pi-audio-${Date.now()}.wav`);
 
-      try {
-        ctx.ui.notify(`Recording for ${duration}s...`, "info");
+      const recorder = spawnSync("bash", ["-lc", "command -v rec || command -v arecord || command -v ffmpeg"], {
+        encoding: "utf8",
+      }).stdout.trim().split("\n")[0];
 
-        const recResult = await pi.exec(
-          "bash",
-          [
-            "-lc",
-            [
-              `if command -v rec >/dev/null 2>&1; then rec -q -c 1 -r 16000 \"${wavPath}\" trim 0 ${duration}; exit $?; fi`,
-              `if command -v arecord >/dev/null 2>&1; then arecord -q -f S16_LE -c 1 -r 16000 -d ${duration} \"${wavPath}\"; exit $?; fi`,
-              `if command -v ffmpeg >/dev/null 2>&1; then ffmpeg -hide_banner -loglevel error -f pulse -i default -ac 1 -ar 16000 -t ${duration} \"${wavPath}\"; exit $?; fi`,
-              "echo 'No recorder found (rec/arecord/ffmpeg)' >&2",
-              "exit 127",
-            ].join("; "),
-          ],
-          { timeout: duration + 8 },
-        );
+      if (!recorder) {
+        ctx.ui.notify("No recorder found (install sox/rec, alsa-utils/arecord, or ffmpeg).", "error");
+        return;
+      }
 
-        if (recResult.code !== 0 || !existsSync(wavPath)) {
-          const details = (recResult.stderr || recResult.stdout || "").trim();
-          ctx.ui.notify("Recording failed (need rec/arecord/ffmpeg + mic permission).", "error");
-          if (details) pi.sendUserMessage(`Audio recording error:\n${details}`);
-          return;
-        }
+      const command = recorder.endsWith("/rec") || recorder === "rec"
+        ? recorder
+        : recorder.endsWith("/arecord") || recorder === "arecord"
+          ? recorder
+          : recorder;
+      const recorderName = command.split("/").pop();
+      const child = recorderName === "rec"
+        ? spawn(command, ["-q", "-c", "1", "-r", "16000", wavPath])
+        : recorderName === "arecord"
+          ? spawn(command, ["-q", "-f", "S16_LE", "-c", "1", "-r", "16000", wavPath])
+          : spawn(command, ["-hide_banner", "-loglevel", "error", "-f", "pulse", "-i", "default", "-ac", "1", "-ar", "16000", wavPath]);
 
-        ctx.ui.notify("Transcribing...", "info");
+      const recording: ActiveRecording = {
+        child,
+        wavPath,
+        stopPhrase,
+        apiKey,
+        stderr: "",
+        transcribing: false,
+      };
+      activeRecording = recording;
 
-        const audioBytes = readFileSync(wavPath);
-        const audioBlob = new Blob([audioBytes], { type: "audio/wav" });
-        const form = new FormData();
-        form.append("file", audioBlob, "audio.wav");
-        form.append("model", "gpt-4o-mini-transcribe");
+      child.stderr.on("data", (chunk) => {
+        recording.stderr += String(chunk);
+      });
 
-        const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-          },
-          body: form,
-        });
+      child.on("close", () => {
+        void transcribeRecording(recording, ctx);
+      });
 
-        if (!res.ok) {
-          const errText = await res.text();
-          ctx.ui.notify(`Transcription failed: ${res.status}`, "error");
-          pi.sendUserMessage(`Transcription API error:\n${errText}`);
-          return;
-        }
+      child.on("error", (error) => {
+        recording.stderr += error.message;
+      });
 
-        const data = (await res.json()) as { text?: string };
-        const transcript = (data.text ?? "").trim();
-
-        if (!transcript) {
-          ctx.ui.notify("No speech detected.", "warning");
-          return;
-        }
-
-        if (stopPhrase && transcript.toLowerCase().includes(stopPhrase.toLowerCase())) {
-          ctx.ui.notify(`Stop phrase detected: \"${stopPhrase}\"`, "info");
-          return;
-        }
-
-        pi.sendUserMessage(transcript);
-        ctx.ui.notify("Transcript inserted into chat.", "info");
-      } catch (error: any) {
-        ctx.ui.notify(`Audio command failed: ${error?.message ?? String(error)}`, "error");
-      } finally {
-        try {
-          if (existsSync(wavPath)) unlinkSync(wavPath);
-        } catch {
-          // ignore cleanup failures
-        }
+      if (duration) {
+        recording.timer = setTimeout(() => stopActiveRecording(ctx), duration * 1000);
+        ctx.ui.notify(`Recording for ${duration}s... Use /audio-stop to finish early.`, "info");
+      } else {
+        ctx.ui.notify("Recording... run /audio-stop when done.", "info");
       }
     },
   });

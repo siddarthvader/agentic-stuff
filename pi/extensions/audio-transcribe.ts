@@ -3,6 +3,7 @@ import { existsSync, readFileSync, statSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { randomUUID } from "node:crypto";
 
 function parseDuration(arg?: string): number | undefined {
   if (!arg) return undefined;
@@ -30,6 +31,48 @@ type ActiveRecording = {
   transcribing: boolean;
   timer?: NodeJS.Timeout;
 };
+
+type TranscriptionResult = { ok: true; text: string } | { ok: false; status: number; error: string };
+
+function buildMultipartBody(fields: Record<string, string>, file: { field: string; name: string; contentType: string; data: Buffer }): { body: Buffer; contentType: string } {
+  const boundary = `----pi-audio-${randomUUID()}`;
+  const chunks: Buffer[] = [];
+
+  for (const [name, value] of Object.entries(fields)) {
+    chunks.push(Buffer.from(`--${boundary}\r\n`));
+    chunks.push(Buffer.from(`Content-Disposition: form-data; name="${name}"\r\n\r\n`));
+    chunks.push(Buffer.from(`${value}\r\n`));
+  }
+
+  chunks.push(Buffer.from(`--${boundary}\r\n`));
+  chunks.push(Buffer.from(`Content-Disposition: form-data; name="${file.field}"; filename="${file.name}"\r\n`));
+  chunks.push(Buffer.from(`Content-Type: ${file.contentType}\r\n\r\n`));
+  chunks.push(file.data);
+  chunks.push(Buffer.from(`\r\n--${boundary}--\r\n`));
+
+  return { body: Buffer.concat(chunks), contentType: `multipart/form-data; boundary=${boundary}` };
+}
+
+async function transcribeWithOpenAI(apiKey: string, audioBytes: Buffer, model: string): Promise<TranscriptionResult> {
+  const { body, contentType } = buildMultipartBody(
+    { model, response_format: "json" },
+    { field: "file", name: "audio.wav", contentType: "audio/wav", data: audioBytes },
+  );
+
+  const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": contentType,
+      "Content-Length": String(body.length),
+    },
+    body,
+  });
+
+  if (!res.ok) return { ok: false, status: res.status, error: await res.text() };
+  const data = (await res.json()) as { text?: string };
+  return { ok: true, text: (data.text ?? "").trim() };
+}
 
 let activeRecording: ActiveRecording | undefined;
 
@@ -66,33 +109,29 @@ export default function audioTranscribeExtension(pi: ExtensionAPI) {
     try {
       if (!existsSync(recording.wavPath) || statSync(recording.wavPath).size < 1024) {
         ctx.ui.notify("Recording was empty. Check mic input/permissions.", "error");
-        if (recording.stderr.trim()) pi.sendUserMessage(`Audio recording error:\n${recording.stderr.trim()}`);
+        if (recording.stderr.trim()) pi.sendUserMessage(`Audio recording error:\n${recording.stderr.trim()}`, { deliverAs: "followUp" });
         return;
       }
 
       ctx.ui.notify("Transcribing...", "info");
 
       const audioBytes = readFileSync(recording.wavPath);
-      const audioBlob = new Blob([audioBytes], { type: "audio/wav" });
-      const form = new FormData();
-      form.append("file", audioBlob, "audio.wav");
-      form.append("model", "gpt-4o-mini-transcribe");
+      const requestedModel = process.env.PI_AUDIO_MODEL?.trim() || "gpt-4o-mini-transcribe";
+      let result = await transcribeWithOpenAI(recording.apiKey, audioBytes, requestedModel);
 
-      const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${recording.apiKey}` },
-        body: form,
-      });
+      // Fallback for older OpenAI accounts/projects that only have Whisper enabled,
+      // or if a proxy/gateway rejects the newer transcribe model.
+      if (!result.ok && requestedModel !== "whisper-1" && /model|must provide a model/i.test(result.error)) {
+        result = await transcribeWithOpenAI(recording.apiKey, audioBytes, "whisper-1");
+      }
 
-      if (!res.ok) {
-        const errText = await res.text();
-        ctx.ui.notify(`Transcription failed: ${res.status}`, "error");
-        pi.sendUserMessage(`Transcription API error:\n${errText}`);
+      if (!result.ok) {
+        ctx.ui.notify(`Transcription failed: ${result.status}`, "error");
+        pi.sendUserMessage(`Transcription API error:\n${result.error}`, { deliverAs: "followUp" });
         return;
       }
 
-      const data = (await res.json()) as { text?: string };
-      const transcript = (data.text ?? "").trim();
+      const transcript = result.text;
 
       if (!transcript) {
         ctx.ui.notify("No speech detected.", "warning");
@@ -104,7 +143,7 @@ export default function audioTranscribeExtension(pi: ExtensionAPI) {
         return;
       }
 
-      pi.sendUserMessage(transcript);
+      pi.sendUserMessage(transcript, { deliverAs: "steer" });
       ctx.ui.notify("Transcript inserted into chat.", "info");
     } catch (error: any) {
       ctx.ui.notify(`Audio command failed: ${error?.message ?? String(error)}`, "error");

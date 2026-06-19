@@ -77,8 +77,11 @@ async function transcribeWithOpenAI(apiKey: string, audioBytes: Buffer, model: s
 let activeRecording: ActiveRecording | undefined;
 
 async function resolveOpenAIApiKey(ctx: any): Promise<string | undefined> {
-  const envKey = process.env.OPENAI_API_KEY?.trim() || process.env.PI_AUDIO_API_KEY?.trim();
-  if (envKey) return envKey;
+  const audioKey = process.env.PI_AUDIO_API_KEY?.trim();
+  if (audioKey) return audioKey;
+
+  const openAIKey = process.env.OPENAI_API_KEY?.trim();
+  if (openAIKey) return openAIKey;
 
   try {
     const currentModel = ctx.model;
@@ -109,7 +112,12 @@ export default function audioTranscribeExtension(pi: ExtensionAPI) {
     try {
       if (!existsSync(recording.wavPath) || statSync(recording.wavPath).size < 1024) {
         ctx.ui.notify("Recording was empty. Check mic input/permissions.", "error");
-        if (recording.stderr.trim()) pi.sendUserMessage(`Audio recording error:\n${recording.stderr.trim()}`, { deliverAs: "followUp" });
+        if (recording.stderr.trim()) pi.sendMessage({
+          customType: "audio-error",
+          content: `Audio recording error:\n${recording.stderr.trim()}`,
+          display: true,
+          details: { source: "pi-audio" },
+        });
         return;
       }
 
@@ -127,7 +135,12 @@ export default function audioTranscribeExtension(pi: ExtensionAPI) {
 
       if (!result.ok) {
         ctx.ui.notify(`Transcription failed: ${result.status}`, "error");
-        pi.sendUserMessage(`Transcription API error:\n${result.error}`, { deliverAs: "followUp" });
+        pi.sendMessage({
+          customType: "audio-error",
+          content: `Transcription API error:\n${result.error}`,
+          display: true,
+          details: { source: "pi-audio", status: result.status },
+        });
         return;
       }
 
@@ -143,8 +156,13 @@ export default function audioTranscribeExtension(pi: ExtensionAPI) {
         return;
       }
 
-      pi.sendUserMessage(transcript, { deliverAs: "steer" });
-      ctx.ui.notify("Transcript inserted into chat.", "info");
+      pi.sendMessage({
+        customType: "audio-transcript",
+        content: transcript,
+        display: true,
+        details: { source: "pi-audio" },
+      });
+      ctx.ui.notify("Transcript added to chat without sending to the model.", "info");
     } catch (error: any) {
       ctx.ui.notify(`Audio command failed: ${error?.message ?? String(error)}`, "error");
     } finally {

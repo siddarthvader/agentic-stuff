@@ -34,6 +34,7 @@ Current extensions include:
 - **[history-context-finder.ts](pi/extensions/history-context-finder.ts)** - Search/summarize prior pi chat history
 - **[smart-commit.ts](pi/extensions/smart-commit.ts)** - Assisted git commit workflow
 - **[smart-tmux.ts](pi/extensions/smart-tmux.ts)** - Smart tmux pane reader
+- **[smart-herdr.ts](pi/extensions/smart-herdr.ts)** - Smart Herdr pane reader
 - **[thinking-trace](pi/extensions/thinking-trace/)** - Read assistant thinking/reasoning trace blocks; `/thinking-trace` opens a persistent HTMX/SSE browser viewer
 - **[todo-manager.ts](pi/extensions/todo-manager.ts)** - Persistent todo list with AI integration
 - **[web-text.ts](pi/extensions/web-text.ts)** - Fetch URLs and perform text web search

@@ -7,6 +7,11 @@ onboarding = false
 [theme]
 name = "tokyo-night"
 
+[theme.custom]
+# Make Herdr's reserved pane scrollbar gutter blend into the terminal/app
+# background as much as possible. Herdr still reserves the 1-column gutter.
+panel_bg = "reset"
+
 [terminal]
 # Match tmux: new tabs/panes start from the current pane/project directory.
 new_cwd = "follow"

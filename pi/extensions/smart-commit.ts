@@ -1,4 +1,5 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
+import { getApiProvider, type Context as AiContext, type TextContent } from "@mariozechner/pi-ai";
 
 type Change = { status: string; path: string };
 const STOP_WORDS = new Set(["const","let","var","function","return","true","false","null","undefined","class","from","import","export","await","async","this","that","with","have","into","your","their","file","files","value","values","string","number","object","array","props","state","data","index"]);
@@ -77,27 +78,83 @@ function buildCommitMessage(nameStatusOutput: string, shortStatOutput: string, d
   return bodyParts.length ? `${header}\n\n${bodyParts.join("\n")}` : header;
 }
 
-async function buildCommitMessageWithAgent(pi: ExtensionAPI, nameStatusOutput: string, shortStatOutput: string, diffText: string): Promise<string | undefined> {
+function cleanCommitMessage(text: string): string | undefined {
+  let cleaned = text.trim();
+  cleaned = cleaned.replace(/^```(?:\w+)?\s*/i, "").replace(/```$/i, "").trim();
+  cleaned = cleaned.replace(/^commit message:\s*/i, "").trim();
+  const lines = cleaned.split("\n").map((line) => line.trimEnd());
+  while (lines.length && !lines[0].trim()) lines.shift();
+  while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+  cleaned = lines.join("\n").trim();
+  if (!cleaned) return undefined;
+  if (!/^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([^)]+\))?!?: .+/i.test(lines[0] || "")) {
+    return undefined;
+  }
+  return cleaned;
+}
+
+async function buildCommitMessageWithModel(
+  ctx: ExtensionCommandContext,
+  nameStatusOutput: string,
+  shortStatOutput: string,
+  diffText: string,
+): Promise<string | undefined> {
+  const model = ctx.model;
+  if (!model) return undefined;
+
+  const provider = getApiProvider(model.api);
+  if (!provider) return undefined;
+
+  const auth = typeof (ctx.modelRegistry as any).getApiKeyAndHeaders === "function"
+    ? await (ctx.modelRegistry as any).getApiKeyAndHeaders(model)
+    : { ok: true, apiKey: await (ctx.modelRegistry as any).getApiKey?.(model) };
+  if (!auth?.ok) return undefined;
+  if (!auth.apiKey && !auth.headers) return undefined;
+
   const prompt = [
-    "Write a high-quality conventional commit message.",
-    "Return ONLY the commit message text (header + optional body).",
-    "Do not add markdown fences.",
-    "Prefer clear intent over file listing.",
+    "Write a high-quality Conventional Commit message for the staged git changes.",
+    "Return ONLY the commit message text: one subject line plus an optional body.",
+    "Do not use markdown fences or explanations.",
+    "The subject must be concise and useful, not a file list.",
+    "Use one of: feat, fix, docs, style, refactor, perf, test, build, ci, chore.",
+    "Mention why/intent in the optional body only if it is clear from the diff.",
     "",
-    "## Changed files (name-status)",
+    "## Changed files (git diff --cached --name-status)",
     nameStatusOutput.trim(),
     "",
     "## Diff shortstat",
     shortStatOutput.trim(),
     "",
-    "## Diff excerpt",
-    diffText.slice(0, 60000),
+    "## Diff excerpt (git diff --cached --unified=0)",
+    diffText.slice(0, Math.min(60000, Math.floor(model.contextWindow * 2))),
   ].join("\n");
 
-  const aiRes = await pi.exec("pi", ["-p", prompt]);
-  if (aiRes.code !== 0) return undefined;
-  const text = (aiRes.stdout || "").trim();
-  return text || undefined;
+  const aiContext: AiContext = {
+    systemPrompt: "You are an expert programmer writing precise Conventional Commit messages.",
+    messages: [{ role: "user", content: prompt, timestamp: Date.now() }],
+  };
+
+  let text = "";
+  const stream = provider.streamSimple(model, aiContext, {
+    apiKey: auth.apiKey,
+    headers: auth.headers,
+    env: auth.env,
+    maxTokens: Math.min(800, model.maxTokens || 800),
+    temperature: 0.2,
+    reasoning: "minimal",
+  });
+
+  for await (const event of stream) {
+    if (event.type === "text_delta") text += event.delta;
+    if (event.type === "text_end" && !text.trim()) text += event.content;
+    if (event.type === "done") {
+      const content = event.message.content.find((c): c is TextContent => c.type === "text");
+      if (!text.trim() && content) text = content.text;
+    }
+    if (event.type === "error") return undefined;
+  }
+
+  return cleanCommitMessage(text);
 }
 
 export default function smartCommitExtension(pi: ExtensionAPI) {
@@ -118,7 +175,11 @@ export default function smartCommitExtension(pi: ExtensionAPI) {
       const diffForAnalysis = (patch.stdout || "").slice(0, 120000);
 
       const heuristicMessage = buildCommitMessage(staged.stdout, shortStat.stdout, diffForAnalysis);
-      const aiMessage = await buildCommitMessageWithAgent(pi, staged.stdout, shortStat.stdout, diffForAnalysis);
+      // Use the current Pi model directly instead of spawning `pi -p`. This keeps
+      // smart commits intelligent without creating a nested Pi session/history.
+      const aiMessage = args?.trim()
+        ? undefined
+        : await buildCommitMessageWithModel(ctx, staged.stdout, shortStat.stdout, diffForAnalysis);
       const finalMessage = args?.trim() ? args.trim() : (aiMessage || heuristicMessage);
 
       if (ctx.hasUI) {

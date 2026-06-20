@@ -1,0 +1,107 @@
+# Herdr config for this repo.
+# Install with: ./herdr/install.sh
+# Herdr reads: ~/.config/herdr/config.toml
+
+onboarding = false
+
+[theme]
+name = "tokyo-night"
+
+[terminal]
+# Match tmux: new tabs/panes start from the current pane/project directory.
+new_cwd = "follow"
+shell_mode = "auto"
+
+[keys]
+# tmux-compatible prefix. "prefix+x" means press Ctrl-b, release, then x.
+prefix = "ctrl+b"
+
+# tmux-ish session/window workflow:
+#   Ctrl-b s  -> workspace picker (closest Herdr equivalent to tmux sessions)
+#   Ctrl-b c  -> new tab (closest Herdr equivalent to tmux window)
+#   Ctrl-b 1..9 -> switch tabs
+# Herdr's default settings key also uses prefix+s; move settings away
+# so prefix+s behaves like tmux's session picker.
+settings = "prefix+shift+s"
+# Free prefix+o for tmux-style next-pane cycling.
+open_notification_target = "prefix+shift+o"
+workspace_picker = "prefix+s"
+goto = "prefix+g"
+new_workspace = "prefix+shift+n"
+rename_workspace = "prefix+shift+w"
+close_workspace = "prefix+shift+d"
+previous_workspace = "prefix+shift+left"
+next_workspace = "prefix+shift+right"
+switch_workspace = "prefix+shift+1..9"
+
+# Agent list navigation: jump to agents from the sidebar's agent section.
+next_agent = "prefix+a"
+previous_agent = "prefix+shift+a"
+focus_agent = "prefix+alt+1..9"
+
+new_tab = "prefix+c"
+previous_tab = "prefix+p"
+next_tab = "prefix+n"
+switch_tab = "prefix+1..9"
+rename_tab = ["prefix+shift+t", "prefix+comma"]
+close_tab = "prefix+shift+x"
+
+# Panes.
+focus_pane_left = "prefix+h"
+focus_pane_down = "prefix+down"
+focus_pane_up = "prefix+k"
+focus_pane_right = "prefix+l"
+navigate_pane_left = "h"
+navigate_pane_down = "j"
+navigate_pane_up = "k"
+navigate_pane_right = "l"
+# Herdr defaults plus tmux-style split bindings:
+#   tmux prefix+%  -> side-by-side split
+#   tmux prefix+"  -> top/bottom split
+split_vertical = ["prefix+v", "prefix+%"]
+# Also bind prefix+j here as the practical replacement for your old tmux popup:
+# it opens a real bottom split instead of a janky temporary/floating pane.
+split_horizontal = ["prefix+j", "prefix+minus", "prefix+\""]
+close_pane = "prefix+x"
+zoom = "prefix+z"
+copy_mode = "prefix+["
+detach = "prefix+q"
+toggle_sidebar = ["prefix+b", "ctrl+alt+b"]
+# tmux config used prefix+r to reload config.
+reload_config = "prefix+r"
+resize_mode = "prefix+shift+r"
+
+# Add a few safe prefix-free shortcuts recommended by Herdr docs.
+# If your terminal/OS steals one, remove it here or free it in terminal settings.
+cycle_pane_next = ["prefix+o", "prefix+tab", "ctrl+alt+tab"]
+
+[ui]
+sidebar_width = 32
+sidebar_min_width = 18
+sidebar_max_width = 36
+mouse_capture = true
+confirm_close = true
+prompt_new_tab_name = true
+show_agent_labels_on_pane_borders = true
+agent_panel_scope = "all"
+accent = "cyan"
+
+[ui.toast]
+delivery = "herdr"
+delay_seconds = 1
+
+[ui.toast.herdr]
+position = "bottom-right"
+
+[ui.sound]
+enabled = true
+
+[advanced]
+scrollback_limit_bytes = 10485760
+
+[session]
+resume_agents_on_restore = true
+
+[experimental]
+# Useful on macOS if non-ASCII input sources make prefix commands awkward.
+switch_ascii_input_source_in_prefix = false

@@ -1,5 +1,4 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
-import { getApiProvider, type Context as AiContext, type TextContent } from "@mariozechner/pi-ai";
 
 type Change = { status: string; path: string };
 const STOP_WORDS = new Set(["const","let","var","function","return","true","false","null","undefined","class","from","import","export","await","async","this","that","with","have","into","your","their","file","files","value","values","string","number","object","array","props","state","data","index"]);
@@ -93,25 +92,35 @@ function cleanCommitMessage(text: string): string | undefined {
   return cleaned;
 }
 
+async function loadPiAi(): Promise<any> {
+  // Pi was renamed from @mariozechner/* to @earendil-works/*. Import the
+  // runtime package first so we use the same helper path as Pi examples.
+  try {
+    return await import("@earendil-works/pi-ai");
+  } catch {
+    return await import("@mariozechner/pi-ai");
+  }
+}
+
 async function buildCommitMessageWithModel(
   ctx: ExtensionCommandContext,
   nameStatusOutput: string,
   shortStatOutput: string,
   diffText: string,
-): Promise<string | undefined> {
-  const model = ctx.model;
-  if (!model) return undefined;
+): Promise<{ message?: string; reason?: string }> {
+  try {
+    const model = ctx.model;
+    if (!model) return { reason: "no current model" };
 
-  const provider = getApiProvider(model.api);
-  if (!provider) return undefined;
+    const { complete } = await loadPiAi();
 
-  const auth = typeof (ctx.modelRegistry as any).getApiKeyAndHeaders === "function"
-    ? await (ctx.modelRegistry as any).getApiKeyAndHeaders(model)
-    : { ok: true, apiKey: await (ctx.modelRegistry as any).getApiKey?.(model) };
-  if (!auth?.ok) return undefined;
-  if (!auth.apiKey && !auth.headers) return undefined;
+    const auth = typeof (ctx.modelRegistry as any).getApiKeyAndHeaders === "function"
+      ? await (ctx.modelRegistry as any).getApiKeyAndHeaders(model)
+      : { ok: true, apiKey: await (ctx.modelRegistry as any).getApiKey?.(model) };
+    if (!auth?.ok) return { reason: auth?.error || "model auth unavailable" };
+    if (!auth.apiKey && !auth.headers) return { reason: `no auth for provider ${model.provider}` };
 
-  const prompt = [
+    const prompt = [
     "Write a high-quality Conventional Commit message for the staged git changes.",
     "Return ONLY the commit message text: one subject line plus an optional body.",
     "Do not use markdown fences or explanations.",
@@ -129,32 +138,29 @@ async function buildCommitMessageWithModel(
     diffText.slice(0, Math.min(60000, Math.floor(model.contextWindow * 2))),
   ].join("\n");
 
-  const aiContext: AiContext = {
-    systemPrompt: "You are an expert programmer writing precise Conventional Commit messages.",
-    messages: [{ role: "user", content: prompt, timestamp: Date.now() }],
-  };
+    const aiContext = {
+      systemPrompt: "You are an expert programmer writing precise Conventional Commit messages.",
+      messages: [{ role: "user", content: prompt, timestamp: Date.now() }],
+    };
 
-  let text = "";
-  const stream = provider.streamSimple(model, aiContext, {
-    apiKey: auth.apiKey,
-    headers: auth.headers,
-    env: auth.env,
-    maxTokens: Math.min(800, model.maxTokens || 800),
-    temperature: 0.2,
-    reasoning: "minimal",
-  });
+    const response = await complete(model, aiContext, {
+      apiKey: auth.apiKey,
+      headers: auth.headers,
+      env: auth.env,
+      maxTokens: Math.min(800, model.maxTokens || 800),
+      reasoning: "minimal",
+    });
+    if (response.stopReason === "error") return { reason: response.error?.errorMessage || "model completion error" };
 
-  for await (const event of stream) {
-    if (event.type === "text_delta") text += event.delta;
-    if (event.type === "text_end" && !text.trim()) text += event.content;
-    if (event.type === "done") {
-      const content = event.message.content.find((c): c is TextContent => c.type === "text");
-      if (!text.trim() && content) text = content.text;
-    }
-    if (event.type === "error") return undefined;
+    const text = response.content
+      .filter((c: any) => c.type === "text")
+      .map((c: any) => c.text)
+      .join("\n");
+    const message = cleanCommitMessage(text);
+    return message ? { message } : { reason: "model returned an invalid commit message" };
+  } catch (error) {
+    return { reason: error instanceof Error ? error.message : String(error) };
   }
-
-  return cleanCommitMessage(text);
 }
 
 export default function smartCommitExtension(pi: ExtensionAPI) {
@@ -177,10 +183,15 @@ export default function smartCommitExtension(pi: ExtensionAPI) {
       const heuristicMessage = buildCommitMessage(staged.stdout, shortStat.stdout, diffForAnalysis);
       // Use the current Pi model directly instead of spawning `pi -p`. This keeps
       // smart commits intelligent without creating a nested Pi session/history.
-      const aiMessage = args?.trim()
-        ? undefined
-        : await buildCommitMessageWithModel(ctx, staged.stdout, shortStat.stdout, diffForAnalysis);
-      const finalMessage = args?.trim() ? args.trim() : (aiMessage || heuristicMessage);
+      let aiResult: { message?: string; reason?: string } | undefined;
+      if (!args?.trim()) {
+        ctx.ui.notify(`Generating commit message with ${ctx.model?.name || ctx.model?.id || "current model"}...`, "info");
+        aiResult = await buildCommitMessageWithModel(ctx, staged.stdout, shortStat.stdout, diffForAnalysis);
+        if (!aiResult.message) {
+          ctx.ui.notify(`LLM commit message unavailable; using fallback (${aiResult.reason || "unknown reason"}).`, "warning");
+        }
+      }
+      const finalMessage = args?.trim() ? args.trim() : (aiResult?.message || heuristicMessage);
 
       if (ctx.hasUI) {
         const ok = await ctx.ui.confirm("Create commit?", `Message:\n\n${finalMessage}\n\nProceed with git commit?`);

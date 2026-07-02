@@ -78,20 +78,34 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerCommand("herdr", {
-    description: "Read a Herdr pane (sorted by relevance)",
+    description: "Pick and read a Herdr pane interactively",
     handler: async (args, ctx) => {
       const target = args?.trim() || undefined;
       if (target) {
         pi.sendUserMessage(`use smart_herdr with target "${target}"`, { deliverAs: "followUp" });
       } else {
-        const picked = await pickPane(undefined, ctx);
+        const picked = await pickPane(undefined, ctx, false);
         if (!picked) { ctx.ui.notify("Cancelled", "info"); return; }
         pi.sendUserMessage(`use smart_herdr with target "${picked.id}"`, { deliverAs: "followUp" });
       }
     },
   });
 
-  async function pickPane(signal: AbortSignal | undefined, ctx: any): Promise<PaneInfo | null> {
+  pi.registerCommand("herdr-auto", {
+    description: "Auto-select and read the most relevant Herdr pane",
+    handler: async (args, ctx) => {
+      const target = args?.trim() || undefined;
+      if (target) {
+        pi.sendUserMessage(`use smart_herdr with target "${target}"`, { deliverAs: "followUp" });
+      } else {
+        const picked = await pickPane(undefined, ctx, true);
+        if (!picked) { ctx.ui.notify("No Herdr pane found", "info"); return; }
+        pi.sendUserMessage(`use smart_herdr with target "${picked.id}"`, { deliverAs: "followUp" });
+      }
+    },
+  });
+
+  async function pickPane(signal: AbortSignal | undefined, ctx: any, autoPick = false): Promise<PaneInfo | null> {
     const [listResult, currentResult] = await Promise.all([
       pi.exec("herdr", ["pane", "list"], { signal, timeout: 3000 }),
       pi.exec("herdr", ["pane", "current", "--current"], { signal, timeout: 2000 }),
@@ -136,6 +150,11 @@ export default function (pi: ExtensionAPI) {
       })
     );
     top.forEach((p, i) => { p.preview = previews[i]; });
+
+    // Default behavior for the tool: do not interrupt the user with a picker.
+    // The scoring above is deterministic enough for agent use; explicit target
+    // is still supported when the caller needs a specific pane.
+    if (autoPick || !ctx.hasUI) return top[0];
 
     return ctx.ui.custom<PaneInfo | null>((tui: any, theme: any, _kb: any, done: (v: PaneInfo | null) => void) => {
       let cursor = 0;
@@ -193,11 +212,12 @@ export default function (pi: ExtensionAPI) {
     name: "smart_herdr",
     label: "Smart Herdr",
     description:
-      "Read a Herdr pane with smart selection. Panes are ranked by relevance: same tab/workspace, recently picked, same project directory, and agent panes. Pass target to skip picking.",
-    promptSnippet: "Read Herdr pane content with smart relevance-based selection",
+      "Read the most relevant Herdr pane automatically. Panes are ranked by relevance: same tab/workspace, recently picked, same project directory, and agent panes. Pass target only when you need a specific pane.",
+    promptSnippet: "Read the automatically selected relevant Herdr pane content",
     promptGuidelines: [
       "Use this to inspect Herdr panes, similar to smart_tmux but for Herdr.",
-      "Omit target to get a relevance-sorted picker. Pass a pane id like w3:pH to read directly.",
+      "Omit target in normal use; the tool will auto-select the most relevant pane without asking the user.",
+      "Pass a pane id like w3:pH only when the user explicitly names a pane.",
       "Use source='recent-unwrapped' for logs or long command output; use source='visible' for current UI state.",
     ],
     parameters: Type.Object({
@@ -217,9 +237,8 @@ export default function (pi: ExtensionAPI) {
 
       let target = params.target;
       if (!target) {
-        if (!ctx.hasUI) throw new Error("No UI available. Pass 'target' parameter.");
-        const picked = await pickPane(signal, ctx);
-        if (!picked) return { content: [{ type: "text", text: "Cancelled." }], details: {} };
+        const picked = await pickPane(signal, ctx, true);
+        if (!picked) return { content: [{ type: "text", text: "No Herdr pane found." }], details: {} };
         target = picked.id;
       }
 

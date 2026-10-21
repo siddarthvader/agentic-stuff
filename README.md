@@ -35,6 +35,7 @@ Current extensions include:
 - **[smart-commit.ts](pi/extensions/smart-commit.ts)** - Assisted git commit workflow
 - **[smart-tmux.ts](pi/extensions/smart-tmux.ts)** - Smart tmux pane reader
 - **[smart-herdr.ts](pi/extensions/smart-herdr.ts)** - Smart Herdr pane reader
+- **[sidequest.ts](pi/extensions/sidequest.ts)** - `/sidequest [topic]` opens an independent Pi session in a sibling Herdr pane, seeded with the last 10 user/assistant messages. Same model, thinking level, and project directory; no reporting or merging back. Tool results, images, and reasoning are excluded. Project files remain shared. Reload Pi to enable the command.
 - **[thinking-trace](pi/extensions/thinking-trace/)** - Read assistant thinking/reasoning trace blocks; `/thinking-trace` opens a persistent HTMX/SSE browser viewer
 - **[todo-manager.ts](pi/extensions/todo-manager.ts)** - Persistent todo list with AI integration
 - **[web-text.ts](pi/extensions/web-text.ts)** - Fetch URLs and perform text web search
